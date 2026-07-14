@@ -1,12 +1,14 @@
 import ast
+import base64
 import io
 import json
 import os
 import sys
-import smtplib
 import subprocess
 import tempfile
 import threading
+import urllib.request
+import urllib.error
 from concurrent.futures import ThreadPoolExecutor
 from functools import wraps
 from collections import OrderedDict
@@ -16,10 +18,6 @@ import anthropic
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
 from dotenv import load_dotenv
-from email import encoders
-from email.mime.base import MIMEBase
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from flask import Flask, flash, redirect, render_template, request, session, url_for
 import sqlite3
 
@@ -31,11 +29,9 @@ app.secret_key = os.environ.get('SECRET_KEY', 'change-me-in-production')
 DB_PATH           = os.environ.get('DB_PATH', 'database.db')
 ADMIN_PASSWORD    = os.environ.get('ADMIN_PASSWORD', 'admin123')
 PROFESSOR_EMAIL   = os.environ.get('PROFESSOR_EMAIL', '')
-SMTP_HOST         = os.environ.get('SMTP_HOST', 'smtp.gmail.com')
-SMTP_PORT         = int(os.environ.get('SMTP_PORT', '587'))
-SMTP_USER         = os.environ.get('SMTP_USER', '')
-SMTP_PASS         = os.environ.get('SMTP_PASS', '')
+SENDER_EMAIL      = os.environ.get('SMTP_USER', '')   # verified sender in SendGrid
 SENDER_NAME       = os.environ.get('SENDER_NAME', 'Student Platform')
+SENDGRID_API_KEY  = os.environ.get('SENDGRID_API_KEY', '')
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
 
 
@@ -562,36 +558,53 @@ def admin_send_now():
 
 # ─── Email helpers ─────────────────────────────────────────────────────────────
 
-def _smtp():
-    import ssl
-    if SMTP_PORT == 465:
-        srv = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=15,
-                                context=ssl.create_default_context())
-        srv.login(SMTP_USER, SMTP_PASS)
-    else:
-        srv = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15)
-        srv.ehlo(); srv.starttls(); srv.login(SMTP_USER, SMTP_PASS)
-    return srv
+def _send_email(to_email, subject, body_text,
+                attachment_bytes=None, attachment_filename=None):
+    """Send email via SendGrid HTTP API (works on Render free tier)."""
+    if not SENDGRID_API_KEY:
+        raise Exception('SENDGRID_API_KEY not set')
+    payload = {
+        'personalizations': [{'to': [{'email': to_email}]}],
+        'from': {'email': SENDER_EMAIL, 'name': SENDER_NAME},
+        'subject': subject,
+        'content': [{'type': 'text/plain', 'value': body_text}],
+    }
+    if attachment_bytes and attachment_filename:
+        payload['attachments'] = [{
+            'content': base64.b64encode(attachment_bytes).decode(),
+            'filename': attachment_filename,
+            'type': 'application/octet-stream',
+            'disposition': 'attachment',
+        }]
+    data = json.dumps(payload).encode('utf-8')
+    req = urllib.request.Request(
+        'https://api.sendgrid.com/v3/mail/send',
+        data=data,
+        headers={
+            'Authorization': f'Bearer {SENDGRID_API_KEY}',
+            'Content-Type': 'application/json',
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15):
+            pass  # 202 Accepted = success
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode('utf-8', errors='replace')
+        raise Exception(f'SendGrid {e.code}: {detail}')
 
 
 def _send_student_confirmation(student_email, questions, answers_map):
-    if not all([SMTP_USER, SMTP_PASS]):
-        print('[Confirmation] SMTP_USER or SMTP_PASS not set')
+    if not SENDGRID_API_KEY:
+        print('[Confirmation] SENDGRID_API_KEY not set')
         return
     try:
-        print(f'[Confirmation] Sending to {student_email} via {SMTP_HOST}:{SMTP_PORT}')
+        print(f'[Confirmation] Sending to {student_email}')
         lines = ['Your answers have been received.\n']
         for i, q in enumerate(questions, 1):
             lines.append(f'Q{i}. {q["title"]}')
             lines.append(answers_map.get(q['id'], '') or '(no answer)')
             lines.append('')
-        msg = MIMEMultipart()
-        msg['From']    = f'{SENDER_NAME} <{SMTP_USER}>'
-        msg['To']      = student_email
-        msg['Subject'] = 'Your submission has been received'
-        msg.attach(MIMEText('\n'.join(lines), 'plain'))
-        with _smtp() as srv:
-            srv.send_message(msg)
+        _send_email(student_email, 'Your submission has been received', '\n'.join(lines))
         print(f'[Confirmation] Sent successfully to {student_email}')
     except Exception as exc:
         print(f'[Confirmation] FAILED: {exc}')
@@ -731,8 +744,8 @@ def build_excel(submission_ids):
 
 def send_report():
     """Analyze latest submission per student, build Excel, email professor."""
-    if not all([PROFESSOR_EMAIL, SMTP_USER, SMTP_PASS]):
-        return False, 'Email not configured — check PROFESSOR_EMAIL, SMTP_USER, SMTP_PASS in .env'
+    if not all([PROFESSOR_EMAIL, SENDGRID_API_KEY]):
+        return False, 'Email not configured — check PROFESSOR_EMAIL and SENDGRID_API_KEY in env vars'
 
     conn = get_db()
     latest = conn.execute('''
@@ -766,24 +779,14 @@ def send_report():
         return False, 'Could not build Excel'
 
     today = date.today().strftime('%Y-%m-%d')
-    msg = MIMEMultipart()
-    msg['From']    = f'{SENDER_NAME} <{SMTP_USER}>'
-    msg['To']      = PROFESSOR_EMAIL
-    msg['Subject'] = f'Student Submissions — {today}'
-    msg.attach(MIMEText(
+    body = (
         f'{len(latest_ids)} student(s) included (latest submission per student only).\n'
-        f'Each code question shows: safety status, pass rate %, avg/max/min time, peak memory, error counts.',
-        'plain'
-    ))
-    part = MIMEBase('application', 'octet-stream')
-    part.set_payload(excel_bytes)
-    encoders.encode_base64(part)
-    part.add_header('Content-Disposition', f'attachment; filename="submissions_{today}.xlsx"')
-    msg.attach(part)
-
+        f'Each code question shows: safety status, pass rate %, avg/max/min time, peak memory, error counts.'
+    )
     try:
-        with _smtp() as srv:
-            srv.send_message(msg)
+        _send_email(PROFESSOR_EMAIL, f'Student Submissions — {today}', body,
+                    attachment_bytes=excel_bytes,
+                    attachment_filename=f'submissions_{today}.xlsx')
         conn = get_db()
         conn.execute('UPDATE submissions SET sent=1 WHERE sent=0')
         conn.commit()
