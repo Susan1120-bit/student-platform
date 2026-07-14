@@ -1,0 +1,101 @@
+{% extends 'base.html' %}
+{% block title %}Admin Dashboard{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <h1>Admin Dashboard</h1>
+  <p>Manage questions and monitor student submissions.</p>
+</div>
+
+<!-- Stats -->
+<div class="stats">
+  <div class="stat">
+    <div class="stat-val">{{ total }}</div>
+    <div class="stat-label">Total Submissions</div>
+  </div>
+  <div class="stat">
+    <div class="stat-val" style="color:{{ '#f59e0b' if unsent_students > 0 else '#16a34a' }}">{{ unsent_students }}</div>
+    <div class="stat-label">Students Pending</div>
+  </div>
+  <div class="stat">
+    <div class="stat-val" style="color:#0f172a">{{ questions | length }}</div>
+    <div class="stat-label">Questions</div>
+  </div>
+</div>
+
+<!-- Daily email -->
+<div class="card">
+  <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:1rem;">
+    <div>
+      <h3 style="font-size:0.95rem; font-weight:700; margin-bottom:0.2rem;">Daily Email Report</h3>
+      <p style="color:#64748b; font-size:0.83rem; line-height:1.5;">
+        Analyzes code, runs 1000 tests, then emails the professor.<br>
+        Only the <strong>latest submission per student</strong> is included.
+      </p>
+    </div>
+    <form method="POST" action="{{ url_for('admin_send_now') }}"
+          onsubmit="return confirm('Send all unsent submissions to the professor now?')">
+      <button type="submit" class="btn btn-success">&#9993;&nbsp; Send Now</button>
+    </form>
+  </div>
+</div>
+
+<!-- Questions -->
+<div class="card">
+  <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.75rem; margin-bottom:1.25rem;">
+    <h3 style="font-size:0.95rem; font-weight:700;">Questions</h3>
+    <a href="{{ url_for('admin_bulk_add') }}" class="btn btn-primary btn-sm">+ Add Question</a>
+  </div>
+
+  {% if questions %}
+  <table>
+    <thead>
+      <tr>
+        <th>Order</th>
+        <th>Title</th>
+        <th>Type</th>
+        <th style="text-align:center;">Submissions</th>
+        <th>Created</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for q in questions %}
+      <tr>
+        <td><span class="badge badge-blue">{{ q['order_num'] }}</span></td>
+        <td><strong>{{ q['title'] }}</strong></td>
+        <td>
+          {% if q['template'] %}
+            <span class="badge" style="background:#f3e8ff;color:#7c3aed;">Code</span>
+          {% else %}
+            <span class="badge" style="background:#f1f5f9;color:#64748b;">Text</span>
+          {% endif %}
+        </td>
+        <td style="text-align:center; font-weight:700; color:#2563eb;">
+          {{ q['submission_count'] }}
+        </td>
+        <td style="color:#94a3b8; font-size:0.8rem;">{{ q['created_at'][:10] }}</td>
+        <td>
+          <div class="btn-row">
+            <a href="{{ url_for('admin_edit_question', qid=q['id']) }}"
+               class="btn btn-outline btn-sm">Edit</a>
+            <form method="POST"
+                  action="{{ url_for('admin_delete_question', qid=q['id']) }}"
+                  style="display:inline"
+                  onsubmit="return confirm('Delete this question and all student answers?')">
+              <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">
+    <p>No questions yet. <a href="{{ url_for('admin_bulk_add') }}" style="color:#2563eb;">Add your first question</a>.</p>
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}

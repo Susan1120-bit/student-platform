@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+{% block title %}Submitted Successfully{% endblock %}
+{% block content %}
+
+<div class="card" style="max-width:480px; margin:3rem auto; text-align:center; padding:3rem 2rem;">
+  <div class="success-icon">&#10003;</div>
+  <h2 style="font-size:1.35rem; margin-bottom:0.5rem;">Submission Received!</h2>
+  <p style="color:#64748b; line-height:1.6;">
+    Your answers have been recorded for<br>
+    <strong style="color:#0f172a;">{{ email }}</strong>
+  </p>
+</div>
+
+<div style="text-align:center;">
+  <a href="{{ url_for('index') }}" class="btn btn-outline">&#8592;&nbsp; Back to Questions</a>
+</div>
+
+{% endblock %}

@@ -1,0 +1,51 @@
+{% extends 'base.html' %}
+{% block title %}{{ action }} Question{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <h1>{{ action }} Question</h1>
+  <p>{% if action == 'Add' %}Create a new question.{% else %}Update this question's details.{% endif %}</p>
+</div>
+
+<div class="card" style="max-width:720px;">
+  <form method="POST">
+
+    <div style="margin-bottom:1.25rem;">
+      <label for="title">Question Title <span style="color:#ef4444">*</span></label>
+      <input type="text" id="title" name="title"
+             value="{{ question['title'] if question else '' }}"
+             placeholder="e.g. Write a function to reverse a string" required>
+    </div>
+
+    <div style="margin-bottom:1.25rem;">
+      <label for="description">Problem Statement <span style="color:#ef4444">*</span></label>
+      <textarea id="description" name="description" style="min-height:160px;"
+                placeholder="Describe the problem, expected input/output, constraints...">{{ question['description'] if question else '' }}</textarea>
+    </div>
+
+    <div style="margin-bottom:1.25rem;">
+      <label for="template">
+        Code Template
+        <span style="font-weight:400; color:#64748b;">(optional — pre-fills student's answer box; marks question as a coding question)</span>
+      </label>
+      <textarea id="template" name="template" class="code-area" style="min-height:160px;"
+                placeholder="def solution(s):&#10;    # Write your code here&#10;    pass">{{ question['template'] if question else '' }}</textarea>
+    </div>
+
+    <div style="margin-bottom:1.75rem;">
+      <label for="order_num">Display Order</label>
+      <input type="number" id="order_num" name="order_num"
+             value="{{ question['order_num'] if question else 0 }}"
+             style="width:110px;" min="0">
+      <p style="color:#94a3b8; font-size:0.8rem; margin-top:0.3rem;">Lower numbers appear first.</p>
+    </div>
+
+    <div class="btn-row">
+      <button type="submit" class="btn btn-primary">{{ action }} Question</button>
+      <a href="{{ url_for('admin_dashboard') }}" class="btn btn-outline">Cancel</a>
+    </div>
+
+  </form>
+</div>
+
+{% endblock %}

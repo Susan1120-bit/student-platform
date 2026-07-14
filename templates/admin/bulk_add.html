@@ -1,0 +1,95 @@
+{% extends 'base.html' %}
+{% block title %}Add Multiple Questions{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <h1>Add Multiple Questions</h1>
+  <p>Fill in as many questions as you need, then submit them all at once.</p>
+</div>
+
+<form method="POST" id="bulk-form">
+  <input type="hidden" name="indices" value="1" id="indices-input">
+
+  <div id="questions-container">
+    <!-- Question blocks injected here by JS, starting with block 1 -->
+  </div>
+
+  <div style="display:flex; gap:0.75rem; margin-bottom:2rem; flex-wrap:wrap;">
+    <button type="button" class="btn btn-outline" onclick="addBlock()">+ Add Another Question</button>
+    <button type="submit" class="btn btn-primary">Save All Questions</button>
+    <a href="{{ url_for('admin_dashboard') }}" class="btn btn-outline">Cancel</a>
+  </div>
+</form>
+
+<template id="block-tpl">
+  <div class="q-block card" data-idx="__IDX__" style="position:relative; margin-bottom:1.25rem;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.1rem;">
+      <strong style="font-size:0.95rem;">Question #__IDX__</strong>
+      <button type="button" class="btn btn-danger btn-sm" onclick="removeBlock(this)" style="display:__HIDE__">
+        &#10005; Remove
+      </button>
+    </div>
+
+    <div style="margin-bottom:1rem;">
+      <label>Title <span style="color:#ef4444">*</span></label>
+      <input type="text" name="title___IDX__" placeholder="e.g. Write a binary search function" required>
+    </div>
+
+    <div style="margin-bottom:1rem;">
+      <label>Problem Statement <span style="color:#ef4444">*</span></label>
+      <textarea name="description___IDX__" style="min-height:120px;"
+                placeholder="Describe the problem..."></textarea>
+    </div>
+
+    <div style="margin-bottom:1rem;">
+      <label>Code Template <span style="font-weight:400; color:#94a3b8;">(optional)</span></label>
+      <textarea name="template___IDX__" class="code-area" style="min-height:110px;"
+                placeholder="def solution():&#10;    pass"></textarea>
+    </div>
+
+    <div>
+      <label>Display Order</label>
+      <input type="number" name="order_num___IDX__" value="__IDX__"
+             style="width:100px;" min="0">
+    </div>
+  </div>
+</template>
+
+<script>
+  let count = 1;
+  const indices = [1];
+
+  function renderBlock(idx, isFirst) {
+    const tpl = document.getElementById('block-tpl').innerHTML
+      .replaceAll('__IDX__', idx)
+      .replace('__HIDE__', isFirst ? 'none' : 'inline-flex');
+    const div = document.createElement('div');
+    div.innerHTML = tpl;
+    document.getElementById('questions-container').appendChild(div.firstElementChild);
+  }
+
+  function addBlock() {
+    count++;
+    indices.push(count);
+    updateIndicesInput();
+    renderBlock(count, false);
+  }
+
+  function removeBlock(btn) {
+    const block = btn.closest('.q-block');
+    const idx = parseInt(block.dataset.idx);
+    const pos = indices.indexOf(idx);
+    if (pos !== -1) indices.splice(pos, 1);
+    updateIndicesInput();
+    block.remove();
+  }
+
+  function updateIndicesInput() {
+    document.getElementById('indices-input').value = indices.join(',');
+  }
+
+  // Render initial block
+  renderBlock(1, true);
+</script>
+
+{% endblock %}
