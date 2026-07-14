@@ -289,58 +289,76 @@ def run_correctness_tests(student_code, reference_code, student_fn_name, n=1000,
 
 # ─── Analysis (runs on Send Now, per submission) ───────────────────────────────
 
+def _analyze_one_answer(answer_id, answer_text, q):
+    """Analyze a single answer. Returns (answer_id, record_dict)."""
+    is_safe, safety_reason = check_code_safety(answer_text)
+    record = {'safety': 'CLEARED' if is_safe else 'NOT CLEARED', 'safety_reason': safety_reason}
+
+    if not is_safe:
+        record['note'] = 'Code not executed due to safety flag'
+    else:
+        fn_name = _find_fn_name(answer_text, q['template'])
+        if not fn_name:
+            record['note'] = 'No function definition found'
+        else:
+            ref_code = generate_reference_solution(q, answer_text)
+            if not ref_code:
+                record['note'] = 'Could not generate reference solution'
+            else:
+                tr = run_correctness_tests(answer_text, ref_code, fn_name)
+                total  = tr.get('total', 0)
+                passed = tr.get('passed', 0)
+                record.update({
+                    'passed':         passed,
+                    'total':          total,
+                    'pass_rate':      round(passed / total * 100, 1) if total > 0 else 0,
+                    'wrong_answers':  tr.get('wrong_answers', 0),
+                    'exceptions':     tr.get('exceptions', 0),
+                    'avg_time_ms':    tr.get('avg_time_ms', 0),
+                    'max_time_ms':    tr.get('max_time_ms', 0),
+                    'min_time_ms':    tr.get('min_time_ms', 0),
+                    'peak_memory_mb': tr.get('peak_memory_mb', 0),
+                    'failures':       tr.get('failures', []),
+                    'error':          tr.get('error', ''),
+                })
+    return answer_id, record
+
+
 def _analyze_one_submission(submission_id, questions_list):
-    """Analyze all unanalyzed code answers for one submission. Safe to call in a thread."""
+    """Analyze all unanalyzed code answers for one submission in parallel."""
     conn = get_db()
     answers = conn.execute(
         'SELECT * FROM answers WHERE submission_id=?', (submission_id,)
     ).fetchall()
+    conn.close()
 
+    tasks = []
     for a in answers:
         if a['claude_feedback']:
-            continue  # already analyzed
-        q = next((q for q in questions_list if q['id'] == a['question_id']), None)
-        if not q or not q['template'] or not a['answer_text']:
             continue
+        q = next((q for q in questions_list if q['id'] == a['question_id']), None)
+        if q and q['template'] and a['answer_text']:
+            tasks.append((a['id'], a['answer_text'], q))
 
-        answer = a['answer_text']
-        is_safe, safety_reason = check_code_safety(answer)
-        record = {'safety': 'CLEARED' if is_safe else 'NOT CLEARED', 'safety_reason': safety_reason}
+    if not tasks:
+        return
 
-        if not is_safe:
-            record['note'] = 'Code not executed due to safety flag'
-        else:
-            fn_name = _find_fn_name(answer, q['template'])
-            if not fn_name:
-                record['note'] = 'No function definition found'
-            else:
-                ref_code = generate_reference_solution(q, answer)
-                if not ref_code:
-                    record['note'] = 'Could not generate reference solution'
-                else:
-                    tr = run_correctness_tests(answer, ref_code, fn_name)
-                    total  = tr.get('total', 0)
-                    passed = tr.get('passed', 0)
-                    record.update({
-                        'passed':         passed,
-                        'total':          total,
-                        'pass_rate':      round(passed / total * 100, 1) if total > 0 else 0,
-                        'wrong_answers':  tr.get('wrong_answers', 0),
-                        'exceptions':     tr.get('exceptions', 0),
-                        'avg_time_ms':    tr.get('avg_time_ms', 0),
-                        'max_time_ms':    tr.get('max_time_ms', 0),
-                        'min_time_ms':    tr.get('min_time_ms', 0),
-                        'peak_memory_mb': tr.get('peak_memory_mb', 0),
-                        'failures':       tr.get('failures', []),
-                        'error':          tr.get('error', ''),
-                    })
+    # Analyze all questions for this student in parallel
+    results = []
+    with ThreadPoolExecutor(max_workers=len(tasks)) as ex:
+        futures = [ex.submit(_analyze_one_answer, aid, atxt, q) for aid, atxt, q in tasks]
+        for f in futures:
+            try:
+                results.append(f.result())
+            except Exception as e:
+                print(f'[Analyze answer] {e}')
 
-        conn.execute(
-            'UPDATE answers SET claude_feedback=? WHERE id=?',
-            (json.dumps(record), a['id'])
-        )
-        conn.commit()
-
+    # Write all results in one DB transaction
+    conn = get_db()
+    for answer_id, record in results:
+        conn.execute('UPDATE answers SET claude_feedback=? WHERE id=?',
+                     (json.dumps(record), answer_id))
+    conn.commit()
     conn.close()
 
 
@@ -384,8 +402,7 @@ def submit():
     if send_confirmation:
         threading.Thread(
             target=_send_student_confirmation,
-            args=(student_email, questions_list, answers_map),
-            daemon=True
+            args=(student_email, questions_list, answers_map)
         ).start()
 
     return render_template('success.html', email=student_email)
