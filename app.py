@@ -534,8 +534,13 @@ def admin_delete_question(qid):
 @app.route('/admin/send-now', methods=['POST'])
 @admin_required
 def admin_send_now():
-    success, message = send_report()
-    flash(message, 'success' if success else 'error')
+    try:
+        success, message = send_report()
+        flash(message, 'success' if success else 'error')
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        flash(f'Unexpected error: {e}', 'error')
     return redirect(url_for('admin_dashboard'))
 
 
@@ -549,8 +554,10 @@ def _smtp():
 
 def _send_student_confirmation(student_email, questions, answers_map):
     if not all([SMTP_USER, SMTP_PASS]):
+        print('[Confirmation] SMTP_USER or SMTP_PASS not set')
         return
     try:
+        print(f'[Confirmation] Sending to {student_email} via {SMTP_HOST}:{SMTP_PORT}')
         lines = ['Your answers have been received.\n']
         for i, q in enumerate(questions, 1):
             lines.append(f'Q{i}. {q["title"]}')
@@ -563,8 +570,9 @@ def _send_student_confirmation(student_email, questions, answers_map):
         msg.attach(MIMEText('\n'.join(lines), 'plain'))
         with _smtp() as srv:
             srv.send_message(msg)
+        print(f'[Confirmation] Sent successfully to {student_email}')
     except Exception as exc:
-        print(f'[Confirmation email] {exc}')
+        print(f'[Confirmation] FAILED: {exc}')
 
 
 # ─── Excel builder ─────────────────────────────────────────────────────────────
