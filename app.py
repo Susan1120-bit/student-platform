@@ -531,24 +531,46 @@ def admin_delete_question(qid):
     return redirect(url_for('admin_dashboard'))
 
 
+_report_running = False
+
 @app.route('/admin/send-now', methods=['POST'])
 @admin_required
 def admin_send_now():
-    try:
-        success, message = send_report()
-        flash(message, 'success' if success else 'error')
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        flash(f'Unexpected error: {e}', 'error')
+    global _report_running
+    if _report_running:
+        flash('A report is already being processed. Please wait.', 'error')
+        return redirect(url_for('admin_dashboard'))
+
+    def _bg():
+        global _report_running
+        try:
+            success, message = send_report()
+            print(f'[SendReport] success={success} | {message}')
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            print(f'[SendReport] Unexpected error: {e}')
+        finally:
+            _report_running = False
+
+    _report_running = True
+    threading.Thread(target=_bg, daemon=False).start()
+    flash('Processing submissions — the report will be emailed shortly. '
+          'Check Render logs for the result.', 'success')
     return redirect(url_for('admin_dashboard'))
 
 
 # ─── Email helpers ─────────────────────────────────────────────────────────────
 
 def _smtp():
-    srv = smtplib.SMTP(SMTP_HOST, SMTP_PORT)
-    srv.ehlo(); srv.starttls(); srv.login(SMTP_USER, SMTP_PASS)
+    import ssl
+    if SMTP_PORT == 465:
+        srv = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=15,
+                                context=ssl.create_default_context())
+        srv.login(SMTP_USER, SMTP_PASS)
+    else:
+        srv = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15)
+        srv.ehlo(); srv.starttls(); srv.login(SMTP_USER, SMTP_PASS)
     return srv
 
 
