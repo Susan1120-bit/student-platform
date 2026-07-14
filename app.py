@@ -31,7 +31,7 @@ ADMIN_PASSWORD    = os.environ.get('ADMIN_PASSWORD', 'admin123')
 PROFESSOR_EMAIL   = os.environ.get('PROFESSOR_EMAIL', '')
 SENDER_EMAIL      = os.environ.get('SMTP_USER', '')   # verified sender in SendGrid
 SENDER_NAME       = os.environ.get('SENDER_NAME', 'Student Platform')
-SENDGRID_API_KEY  = os.environ.get('SENDGRID_API_KEY', '')
+BREVO_API_KEY     = os.environ.get('BREVO_API_KEY', '')
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
 
 
@@ -560,42 +560,40 @@ def admin_send_now():
 
 def _send_email(to_email, subject, body_text,
                 attachment_bytes=None, attachment_filename=None):
-    """Send email via SendGrid HTTP API (works on Render free tier)."""
-    if not SENDGRID_API_KEY:
-        raise Exception('SENDGRID_API_KEY not set')
+    """Send email via Brevo HTTP API (works on Render free tier)."""
+    if not BREVO_API_KEY:
+        raise Exception('BREVO_API_KEY not set')
     payload = {
-        'personalizations': [{'to': [{'email': to_email}]}],
-        'from': {'email': SENDER_EMAIL, 'name': SENDER_NAME},
+        'sender': {'email': SENDER_EMAIL, 'name': SENDER_NAME},
+        'to': [{'email': to_email}],
         'subject': subject,
-        'content': [{'type': 'text/plain', 'value': body_text}],
+        'textContent': body_text,
     }
     if attachment_bytes and attachment_filename:
-        payload['attachments'] = [{
+        payload['attachment'] = [{
             'content': base64.b64encode(attachment_bytes).decode(),
-            'filename': attachment_filename,
-            'type': 'application/octet-stream',
-            'disposition': 'attachment',
+            'name': attachment_filename,
         }]
     data = json.dumps(payload).encode('utf-8')
     req = urllib.request.Request(
-        'https://api.sendgrid.com/v3/mail/send',
+        'https://api.brevo.com/v3/smtp/email',
         data=data,
         headers={
-            'Authorization': f'Bearer {SENDGRID_API_KEY}',
+            'api-key': BREVO_API_KEY,
             'Content-Type': 'application/json',
         },
     )
     try:
         with urllib.request.urlopen(req, timeout=15):
-            pass  # 202 Accepted = success
+            pass  # 201 Created = success
     except urllib.error.HTTPError as e:
         detail = e.read().decode('utf-8', errors='replace')
-        raise Exception(f'SendGrid {e.code}: {detail}')
+        raise Exception(f'Brevo {e.code}: {detail}')
 
 
 def _send_student_confirmation(student_email, questions, answers_map):
-    if not SENDGRID_API_KEY:
-        print('[Confirmation] SENDGRID_API_KEY not set')
+    if not BREVO_API_KEY:
+        print('[Confirmation] BREVO_API_KEY not set')
         return
     try:
         print(f'[Confirmation] Sending to {student_email}')
@@ -744,8 +742,8 @@ def build_excel(submission_ids):
 
 def send_report():
     """Analyze latest submission per student, build Excel, email professor."""
-    if not all([PROFESSOR_EMAIL, SENDGRID_API_KEY]):
-        return False, 'Email not configured — check PROFESSOR_EMAIL and SENDGRID_API_KEY in env vars'
+    if not all([PROFESSOR_EMAIL, BREVO_API_KEY]):
+        return False, 'Email not configured — check PROFESSOR_EMAIL and BREVO_API_KEY in env vars'
 
     conn = get_db()
     latest = conn.execute('''
