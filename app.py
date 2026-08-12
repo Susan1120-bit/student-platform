@@ -134,6 +134,21 @@ def run_student_code(code, timeout=5):
         return '', str(exc), -1
 
 
+def _looks_like_code(text):
+    """Heuristic: detect whether a free-text answer is likely Python code."""
+    if not text:
+        return False
+    txt = text.strip()
+    # Quick checks for common Python constructs
+    keywords = ('def ', 'class ', 'import ', 'from ', 'lambda ', 'return ', 'if ', 'for ', 'while ')
+    if any(k in txt for k in keywords):
+        return True
+    # Multiline answers are likely code
+    if '\n' in txt:
+        return True
+    return False
+
+
 # ─── Claude: safety check ──────────────────────────────────────────────────────
 
 def check_code_safety(code):
@@ -333,7 +348,9 @@ def _analyze_one_submission(submission_id, questions_list):
         if a['claude_feedback']:
             continue
         q = next((q for q in questions_list if q['id'] == a['question_id']), None)
-        if q and q['template'] and a['answer_text']:
+        # Analyze if the question has a template (explicit code question)
+        # or if the student's answer looks like code (heuristic).
+        if q and a['answer_text'] and (q.get('template') or _looks_like_code(a['answer_text'])):
             tasks.append((a['id'], a['answer_text'], q))
 
     if not tasks:
