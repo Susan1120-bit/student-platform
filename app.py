@@ -691,7 +691,12 @@ def build_excel(submission_ids):
         sub_map[sid]['answers'][row['question_id']]  = row['answer_text'] or ''
         sub_map[sid]['feedback'][row['question_id']] = row['claude_feedback'] or ''
         if row['question_id'] not in q_meta:
-            q_meta[row['question_id']] = {'title': row['title'], 'is_code': bool(row['template'])}
+            # Treat a question as a code question if it has a template OR if
+            # analysis/feedback exists for that answer (claude_feedback).
+            q_meta[row['question_id']] = {
+                'title': row['title'],
+                'is_code': bool(row['template']) or bool(row['claude_feedback'])
+            }
 
     wb = openpyxl.Workbook()
     ws = wb.active
