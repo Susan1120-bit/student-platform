@@ -79,6 +79,11 @@
           <div class="btn-row">
             <a href="{{ url_for('admin_edit_question', qid=q['id']) }}"
                class="btn btn-outline btn-sm">Edit</a>
+            <form method="POST" action="{{ url_for('admin_toggle_release', qid=q['id']) }}" style="display:inline">
+              <button type="submit" class="btn btn-sm" style="background:{{ '#15803D' if q.get('released') else '#ef4444' }}; color:white;">
+                {{ 'Unrelease' if q.get('released') else 'Release' }}
+              </button>
+            </form>
             <form method="POST"
                   action="{{ url_for('admin_delete_question', qid=q['id']) }}"
                   style="display:inline"

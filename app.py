@@ -51,6 +51,7 @@ def init_db():
             title TEXT NOT NULL,
             description TEXT NOT NULL,
             template TEXT DEFAULT '',
+            released INTEGER DEFAULT 0,
             order_num INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -72,7 +73,10 @@ def init_db():
     ''')
     for sql in [
         'ALTER TABLE questions ADD COLUMN template TEXT DEFAULT ""',
+        'ALTER TABLE questions ADD COLUMN released INTEGER DEFAULT 0',
         'ALTER TABLE answers ADD COLUMN claude_feedback TEXT DEFAULT ""',
+        'ALTER TABLE submissions ADD COLUMN student_name TEXT DEFAULT ""',
+        'ALTER TABLE submissions ADD COLUMN student_identifier TEXT DEFAULT ""',
     ]:
         try:
             conn.execute(sql)
@@ -332,6 +336,16 @@ def _analyze_one_answer(answer_id, answer_text, q):
                     'failures':       tr.get('failures', []),
                     'error':          tr.get('error', ''),
                 })
+                # Compute a raw score that mixes correctness and speed.
+                # If nothing passed, score is 0. Otherwise higher pass_rate and lower avg_time increase score.
+                avg_t = tr.get('avg_time_ms', 0) or 0
+                if total == 0 or passed == 0:
+                    score_raw = 0.0
+                else:
+                    correctness = passed / total
+                    time_factor = 1.0 / (avg_t + 1.0)
+                    score_raw = correctness * time_factor * 1000.0
+                record['score_raw'] = round(score_raw, 4)
     return answer_id, record
 
 
@@ -380,7 +394,8 @@ def _analyze_one_submission(submission_id, questions_list):
 @app.route('/')
 def index():
     conn = get_db()
-    questions = conn.execute('SELECT * FROM questions ORDER BY order_num, id').fetchall()
+    # Only show released questions to students
+    questions = conn.execute('SELECT * FROM questions WHERE released=1 ORDER BY order_num, id').fetchall()
     conn.close()
     return render_template('index.html', questions=questions)
 
@@ -388,6 +403,8 @@ def index():
 @app.route('/submit', methods=['POST'])
 def submit():
     student_email = request.form.get('student_email', '').strip()
+    student_name = request.form.get('student_name', '').strip()
+    student_identifier = request.form.get('student_identifier', '').strip()
     if not student_email or '@' not in student_email:
         flash('Please enter a valid email address.', 'error')
         return redirect(url_for('index'))
@@ -396,7 +413,8 @@ def submit():
 
     conn = get_db()
     questions = conn.execute('SELECT * FROM questions ORDER BY order_num, id').fetchall()
-    cur = conn.execute('INSERT INTO submissions (student_email) VALUES (?)', (student_email,))
+    cur = conn.execute('INSERT INTO submissions (student_email, student_name, student_identifier) VALUES (?,?,?)',
+                       (student_email, student_name, student_identifier))
     submission_id = cur.lastrowid
 
     questions_list = [dict(q) for q in questions]
@@ -544,6 +562,23 @@ def admin_delete_question(qid):
     return redirect(url_for('admin_dashboard'))
 
 
+@app.route('/admin/questions/toggle-release/<int:qid>', methods=['POST'])
+@admin_required
+def admin_toggle_release(qid):
+    conn = get_db()
+    q = conn.execute('SELECT released FROM questions WHERE id=?', (qid,)).fetchone()
+    if not q:
+        conn.close()
+        flash('Question not found.', 'error')
+        return redirect(url_for('admin_dashboard'))
+    new = 0 if q['released'] else 1
+    conn.execute('UPDATE questions SET released=? WHERE id=?', (new, qid))
+    conn.commit()
+    conn.close()
+    flash('Question updated.', 'success')
+    return redirect(url_for('admin_dashboard'))
+
+
 _report_running = False
 
 @app.route('/admin/send-now', methods=['POST'])
@@ -661,6 +696,7 @@ def _parse_feedback(raw):
         'max_time':   f"{d.get('max_time_ms', 0):.3f} ms",
         'min_time':   f"{d.get('min_time_ms', 0):.3f} ms",
         'peak_mem':   f"{d.get('peak_memory_mb', 0):.4f} MB",
+        'score':      f"{d.get('score_raw', 0):.4f}",
         'wrong':      str(d.get('wrong_answers', 0)),
         'exceptions': str(d.get('exceptions', 0)),
     }
@@ -673,6 +709,7 @@ _CODE_COLS = [
     ('— Max Time',      16, 'max_time'),
     ('— Min Time',      16, 'min_time'),
     ('— Peak Memory',   16, 'peak_mem'),
+    ('— Score',         14, 'score'),
     ('— Wrong Answers', 16, 'wrong'),
     ('— Exceptions',    14, 'exceptions'),
 ]
