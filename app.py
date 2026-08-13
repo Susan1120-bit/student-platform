@@ -538,34 +538,42 @@ def admin_logout():
 @app.route('/admin')
 @admin_required
 def admin_dashboard():
-    conn = get_db()
-    questions = conn.execute('''
-        SELECT q.*, COUNT(DISTINCT a.submission_id) AS submission_count
-        FROM questions q
-        LEFT JOIN answers a ON a.question_id = q.id
-        GROUP BY q.id
-        ORDER BY q.order_num, q.id
-    ''').fetchall()
-    def _scalar(q):
-        r = conn.execute(q).fetchone()
-        if r is None:
-            return 0
-        try:
-            return r[0]
-        except Exception:
-            try:
-                return list(r.values())[0]
-            except Exception:
+    try:
+        conn = get_db()
+        questions = conn.execute('''
+            SELECT q.*, COUNT(DISTINCT a.submission_id) AS submission_count
+            FROM questions q
+            LEFT JOIN answers a ON a.question_id = q.id
+            GROUP BY q.id
+            ORDER BY q.order_num, q.id
+        ''').fetchall()
+        def _scalar(q):
+            r = conn.execute(q).fetchone()
+            if r is None:
                 return 0
+            try:
+                return r[0]
+            except Exception:
+                try:
+                    return list(r.values())[0]
+                except Exception:
+                    return 0
 
-    total = _scalar('SELECT COUNT(*) FROM submissions')
-    unsent = _scalar('SELECT COUNT(*) FROM submissions WHERE sent=0')
+        total = _scalar('SELECT COUNT(*) FROM submissions')
+        unsent = _scalar('SELECT COUNT(*) FROM submissions WHERE sent=0')
 
-    # Count distinct students with unsent submissions
-    unsent_students = _scalar('SELECT COUNT(DISTINCT student_email) FROM submissions WHERE sent=0')
-    conn.close()
-    return render_template('admin/dashboard.html', questions=questions,
-                           total=total, unsent=unsent, unsent_students=unsent_students)
+        # Count distinct students with unsent submissions
+        unsent_students = _scalar('SELECT COUNT(DISTINCT student_email) FROM submissions WHERE sent=0')
+        conn.close()
+        return render_template('admin/dashboard.html', questions=questions,
+                               total=total, unsent=unsent, unsent_students=unsent_students)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print('[ADMIN DASHBOARD] Error:', e)
+        # Show a simplified error page instead of a generic 500
+        return ("An error occurred while loading the admin dashboard. "
+                "Check server logs for details."), 500
 
 
 @app.route('/admin/questions/add', methods=['GET', 'POST'])
