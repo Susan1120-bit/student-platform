@@ -597,15 +597,28 @@ def admin_bulk_add():
         added = 0
         for i in indices:
             i = i.strip()
-            title    = request.form.get(f'title_{i}', '').strip()
-            desc     = request.form.get(f'description_{i}', '').strip()
-            template = request.form.get(f'template_{i}', '').strip()
-            order    = int(request.form.get(f'order_num_{i}', '0') or '0')
+            # Support both single-underscore and triple-underscore naming used by templates
+            title = (request.form.get(f'title_{i}') or request.form.get(f'title___{i}') or '').strip()
+            desc = (request.form.get(f'description_{i}') or request.form.get(f'description___{i}') or '').strip()
+            template = (request.form.get(f'template_{i}') or request.form.get(f'template___{i}') or '').strip()
+            order_raw = (request.form.get(f'order_num_{i}') or request.form.get(f'order_num___{i}') or '0')
+            try:
+                order = int(order_raw or '0')
+            except ValueError:
+                order = 0
             if title and desc:
-                conn.execute('INSERT INTO questions (title, description, template, order_num) VALUES (?,?,?,?)',
-                             (title, desc, template, order))
-                added += 1
-        conn.commit()
+                try:
+                    conn.execute('INSERT INTO questions (title, description, template, order_num) VALUES (?,?,?,?)',
+                                 (title, desc, template, order))
+                    added += 1
+                except Exception as e:
+                    # Safe-guard: log the error to server console for debugging but continue
+                    print('[BULK ADD] DB insert error:', e)
+                    continue
+        try:
+            conn.commit()
+        except Exception as e:
+            print('[BULK ADD] Commit error:', e)
         conn.close()
         flash(f'{added} question(s) added.', 'success')
         return redirect(url_for('admin_dashboard'))
