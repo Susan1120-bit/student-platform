@@ -600,36 +600,46 @@ def admin_add_question():
 @admin_required
 def admin_bulk_add():
     if request.method == 'POST':
-        indices = request.form.get('indices', '').split(',')
-        conn = get_db()
-        added = 0
-        for i in indices:
-            i = i.strip()
-            # Support both single-underscore and triple-underscore naming used by templates
-            title = (request.form.get(f'title_{i}') or request.form.get(f'title___{i}') or '').strip()
-            desc = (request.form.get(f'description_{i}') or request.form.get(f'description___{i}') or '').strip()
-            template = (request.form.get(f'template_{i}') or request.form.get(f'template___{i}') or '').strip()
-            order_raw = (request.form.get(f'order_num_{i}') or request.form.get(f'order_num___{i}') or '0')
-            try:
-                order = int(order_raw or '0')
-            except ValueError:
-                order = 0
-            if title and desc:
-                try:
-                    conn.execute('INSERT INTO questions (title, description, template, order_num) VALUES (?,?,?,?)',
-                                 (title, desc, template, order))
-                    added += 1
-                except Exception as e:
-                    # Safe-guard: log the error to server console for debugging but continue
-                    print('[BULK ADD] DB insert error:', e)
-                    continue
+        import traceback
         try:
-            conn.commit()
+            # Log incoming form for debugging
+            print('[BULK ADD] form keys:', dict(request.form))
+            indices = request.form.get('indices', '').split(',')
+            conn = get_db()
+            added = 0
+            for i in indices:
+                i = i.strip()
+                # Support both single-underscore and triple-underscore naming used by templates
+                title = (request.form.get(f'title_{i}') or request.form.get(f'title___{i}') or '').strip()
+                desc = (request.form.get(f'description_{i}') or request.form.get(f'description___{i}') or '').strip()
+                template = (request.form.get(f'template_{i}') or request.form.get(f'template___{i}') or '').strip()
+                order_raw = (request.form.get(f'order_num_{i}') or request.form.get(f'order_num___{i}') or '0')
+                try:
+                    order = int(order_raw or '0')
+                except ValueError:
+                    order = 0
+                if title and desc:
+                    try:
+                        conn.execute('INSERT INTO questions (title, description, template, order_num) VALUES (?,?,?,?)',
+                                     (title, desc, template, order))
+                        added += 1
+                    except Exception as e:
+                        print('[BULK ADD] DB insert error:', e)
+                        traceback.print_exc()
+                        continue
+            try:
+                conn.commit()
+            except Exception as e:
+                print('[BULK ADD] Commit error:', e)
+                traceback.print_exc()
+            conn.close()
+            flash(f'{added} question(s) added.', 'success')
+            return redirect(url_for('admin_dashboard'))
         except Exception as e:
-            print('[BULK ADD] Commit error:', e)
-        conn.close()
-        flash(f'{added} question(s) added.', 'success')
-        return redirect(url_for('admin_dashboard'))
+            traceback.print_exc()
+            print('[BULK ADD] Unexpected error:', e)
+            flash('An error occurred while adding questions. Check server logs.', 'error')
+            return redirect(url_for('admin_dashboard'))
     return render_template('admin/bulk_add.html')
 
 
