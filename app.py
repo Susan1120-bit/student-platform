@@ -33,6 +33,9 @@ SENDER_EMAIL      = os.environ.get('SMTP_USER', '')   # verified sender in SendG
 SENDER_NAME       = os.environ.get('SENDER_NAME', 'Student Platform')
 BREVO_API_KEY     = os.environ.get('BREVO_API_KEY', '')
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
+# When true, the student-facing routes are disabled — admin site only.
+# Set ADMIN_ONLY=true in the admin service env to isolate the admin site.
+ADMIN_ONLY = os.environ.get('ADMIN_ONLY', 'false').lower() in ('1', 'true', 'yes')
 
 
 # ─── Database ──────────────────────────────────────────────────────────────────
@@ -131,6 +134,19 @@ def admin_required(f):
             return redirect(url_for('admin_login'))
         return f(*args, **kwargs)
     return decorated
+
+
+# If ADMIN_ONLY is enabled, block non-admin routes so the student site is not publicly accessible.
+@app.before_request
+def _admin_only_guard():
+    if not ADMIN_ONLY:
+        return
+    # Allow admin endpoints, static assets, and health checks
+    p = (request.path or '').lower()
+    if p.startswith('/admin') or p.startswith('/static') or p == '/favicon.ico':
+        return
+    # Otherwise hide the student app
+    return ('Not Found', 404)
 
 
 # ─── Code utilities ────────────────────────────────────────────────────────────
