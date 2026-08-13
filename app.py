@@ -541,41 +541,70 @@ def index():
 
 @app.route('/submit', methods=['POST'])
 def submit():
-    student_email = request.form.get('student_email', '').strip()
-    student_name = request.form.get('student_name', '').strip()
-    student_identifier = request.form.get('student_identifier', '').strip()
-    if not student_email or '@' not in student_email:
-        flash('Please enter a valid email address.', 'error')
+    import traceback
+    try:
+        student_email = request.form.get('student_email', '').strip()
+        student_name = request.form.get('student_name', '').strip()
+        student_identifier = request.form.get('student_identifier', '').strip()
+        if not student_email or '@' not in student_email:
+            flash('Please enter a valid email address.', 'error')
+            return redirect(url_for('index'))
+
+        send_confirmation = request.form.get('send_confirmation') == 'on'
+
+        # Log form for debugging
+        print('[SUBMIT] form keys:', dict(request.form))
+
+        conn = get_db()
+        questions = conn.execute('SELECT * FROM questions ORDER BY order_num, id').fetchall()
+
+        cur = conn.execute('INSERT INTO submissions (student_email, student_name, student_identifier) VALUES (?,?,?)',
+                           (student_email, student_name, student_identifier))
+        # Get the inserted submission id in a DB-agnostic way
+        submission_id = None
+        try:
+            submission_id = getattr(cur, 'lastrowid', None)
+        except Exception:
+            submission_id = None
+        if not submission_id:
+            try:
+                # For Postgres, LASTVAL() returns last sequence value for this session
+                r = conn.execute('SELECT LASTVAL()').fetchone()
+                if r:
+                    submission_id = r[0]
+            except Exception:
+                try:
+                    r = conn.execute('SELECT id FROM submissions ORDER BY id DESC LIMIT 1').fetchone()
+                    if r:
+                        submission_id = r[0]
+                except Exception:
+                    submission_id = None
+
+        questions_list = [dict(q) for q in questions]
+        answers_map = {}
+        for q in questions_list:
+            answer = request.form.get(f'answer_{q["id"]}', '').strip()
+            answers_map[q['id']] = answer
+            conn.execute(
+                'INSERT INTO answers (submission_id, question_id, answer_text) VALUES (?, ?, ?)',
+                (submission_id, q['id'], answer)
+            )
+
+        conn.commit()
+        conn.close()
+
+        if send_confirmation:
+            threading.Thread(
+                target=_send_student_confirmation,
+                args=(student_email, questions_list, answers_map)
+            ).start()
+
+        return render_template('success.html', email=student_email)
+    except Exception as e:
+        traceback.print_exc()
+        print('[SUBMIT] Unexpected error:', e)
+        flash('An error occurred while submitting your answers. Please try again.', 'error')
         return redirect(url_for('index'))
-
-    send_confirmation = request.form.get('send_confirmation') == 'on'
-
-    conn = get_db()
-    questions = conn.execute('SELECT * FROM questions ORDER BY order_num, id').fetchall()
-    cur = conn.execute('INSERT INTO submissions (student_email, student_name, student_identifier) VALUES (?,?,?)',
-                       (student_email, student_name, student_identifier))
-    submission_id = cur.lastrowid
-
-    questions_list = [dict(q) for q in questions]
-    answers_map = {}
-    for q in questions_list:
-        answer = request.form.get(f'answer_{q["id"]}', '').strip()
-        answers_map[q['id']] = answer
-        conn.execute(
-            'INSERT INTO answers (submission_id, question_id, answer_text) VALUES (?, ?, ?)',
-            (submission_id, q['id'], answer)
-        )
-
-    conn.commit()
-    conn.close()
-
-    if send_confirmation:
-        threading.Thread(
-            target=_send_student_confirmation,
-            args=(student_email, questions_list, answers_map)
-        ).start()
-
-    return render_template('success.html', email=student_email)
 
 
 # ─── Admin routes ──────────────────────────────────────────────────────────────
