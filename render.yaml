@@ -1,0 +1,23 @@
+# Render spec to create both student and admin web services from this repo.
+# After pushing this file, Render can create services automatically when you import the repo.
+
+services:
+  - type: web
+    name: student-platform
+    env: python
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --workers 1 --timeout 300 --bind 0.0.0.0:$PORT app:app
+    disk:
+      sizeGb: 1
+    autoDeploy: true
+
+  - type: web
+    name: student-platform-admin
+    env: python
+    branch: admin
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --workers 1 --timeout 300 --bind 0.0.0.0:$PORT app:app
+    disk:
+      sizeGb: 1
+    autoDeploy: true

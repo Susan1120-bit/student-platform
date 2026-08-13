@@ -38,6 +38,42 @@ ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
 # ─── Database ──────────────────────────────────────────────────────────────────
 
 def get_db():
+    # Return a DB wrapper that supports either SQLite (default) or Postgres when
+    # DATABASE_URL is set. This keeps the rest of the codebase mostly unchanged.
+    DATABASE_URL = os.environ.get('DATABASE_URL')
+    if DATABASE_URL:
+        try:
+            import psycopg
+            from psycopg.rows import dict_row
+        except Exception:
+            raise
+
+        class PGDB:
+            def __init__(self, dsn):
+                self._conn = psycopg.connect(dsn)
+            def execute(self, sql, params=()):
+                sql2 = sql.replace('?', '%s')
+                cur = self._conn.cursor(row_factory=dict_row)
+                cur.execute(sql2, params)
+                return cur
+            def executescript(self, script):
+                cur = self._conn.cursor()
+                # Naive split on semicolons; acceptable for our simple init script
+                for stmt in script.split(';'):
+                    s = stmt.strip()
+                    if s:
+                        cur.execute(s)
+                return cur
+            def commit(self):
+                return self._conn.commit()
+            def close(self):
+                try:
+                    self._conn.close()
+                except Exception:
+                    pass
+
+        return PGDB(DATABASE_URL)
+
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
@@ -100,31 +136,65 @@ def admin_required(f):
 # ─── Code utilities ────────────────────────────────────────────────────────────
 
 def _claude():
-    return anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    DATABASE_URL = os.environ.get('DATABASE_URL')
+    if DATABASE_URL:
+        sql = '''
+        CREATE TABLE IF NOT EXISTS questions (
+            id SERIAL PRIMARY KEY,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL,
+            template TEXT DEFAULT '',
+            released INTEGER DEFAULT 0,
+            order_num INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS submissions (
+            id SERIAL PRIMARY KEY,
+            student_email TEXT NOT NULL,
+            student_name TEXT DEFAULT '',
+            student_identifier TEXT DEFAULT '',
+            submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            sent INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS answers (
+            id SERIAL PRIMARY KEY,
+            submission_id INTEGER NOT NULL,
+            question_id INTEGER NOT NULL,
+            answer_text TEXT DEFAULT '',
+            claude_feedback TEXT DEFAULT ''
+        );
+        '''
+    else:
+        sql = '''
+        CREATE TABLE IF NOT EXISTS questions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL,
+            template TEXT DEFAULT '',
+            released INTEGER DEFAULT 0,
+            order_num INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS submissions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            student_email TEXT NOT NULL,
+            student_name TEXT DEFAULT '',
+            student_identifier TEXT DEFAULT '',
+            submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            sent INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS answers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            submission_id INTEGER NOT NULL,
+            question_id INTEGER NOT NULL,
+            answer_text TEXT DEFAULT '',
+            claude_feedback TEXT DEFAULT '',
+            FOREIGN KEY (submission_id) REFERENCES submissions(id),
+            FOREIGN KEY (question_id) REFERENCES questions(id)
+        );
+        '''
 
-
-def _find_fn_name(student_code, template=''):
-    def first_fn(code):
-        try:
-            for node in ast.walk(ast.parse(code)):
-                if isinstance(node, ast.FunctionDef):
-                    return node.name
-        except Exception:
-            pass
-        return None
-
-    if template:
-        tpl_fn = first_fn(template)
-        if tpl_fn:
-            try:
-                for node in ast.walk(ast.parse(student_code)):
-                    if isinstance(node, ast.FunctionDef) and node.name == tpl_fn:
-                        return tpl_fn
-            except Exception:
-                pass
-    return first_fn(student_code)
-
-
+    conn.executescript(sql)
 def run_student_code(code, timeout=5):
     try:
         r = subprocess.run(
@@ -468,13 +538,23 @@ def admin_dashboard():
         GROUP BY q.id
         ORDER BY q.order_num, q.id
     ''').fetchall()
-    total  = conn.execute('SELECT COUNT(*) FROM submissions').fetchone()[0]
-    unsent = conn.execute('SELECT COUNT(*) FROM submissions WHERE sent=0').fetchone()[0]
+    def _scalar(q):
+        r = conn.execute(q).fetchone()
+        if r is None:
+            return 0
+        try:
+            return r[0]
+        except Exception:
+            try:
+                return list(r.values())[0]
+            except Exception:
+                return 0
+
+    total = _scalar('SELECT COUNT(*) FROM submissions')
+    unsent = _scalar('SELECT COUNT(*) FROM submissions WHERE sent=0')
 
     # Count distinct students with unsent submissions
-    unsent_students = conn.execute(
-        'SELECT COUNT(DISTINCT student_email) FROM submissions WHERE sent=0'
-    ).fetchone()[0]
+    unsent_students = _scalar('SELECT COUNT(DISTINCT student_email) FROM submissions WHERE sent=0')
     conn.close()
     return render_template('admin/dashboard.html', questions=questions,
                            total=total, unsent=unsent, unsent_students=unsent_students)

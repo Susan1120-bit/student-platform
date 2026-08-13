@@ -5,3 +5,4 @@ python-dotenv>=1.0.0
 gunicorn>=21.0.0
 pytz>=2024.1
 anthropic>=0.40.0
+psycopg[binary]>=3.2.0
