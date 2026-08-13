@@ -558,30 +558,49 @@ def submit():
         conn = get_db()
         questions = conn.execute('SELECT * FROM questions ORDER BY order_num, id').fetchall()
 
-        cur = conn.execute('INSERT INTO submissions (student_email, student_name, student_identifier) VALUES (?,?,?)',
-                           (student_email, student_name, student_identifier))
-        # Get the inserted submission id in a DB-agnostic way
+        # Insert submission and retrieve id reliably for both SQLite and Postgres
+        is_postgres = bool(os.environ.get('DATABASE_URL'))
         submission_id = None
-        try:
-            submission_id = getattr(cur, 'lastrowid', None)
-        except Exception:
-            submission_id = None
-        if not submission_id:
+        if is_postgres:
+            # Use RETURNING to get the id atomically in Postgres
             try:
-                # For Postgres, LASTVAL() returns last sequence value for this session
-                r = conn.execute('SELECT LASTVAL()').fetchone()
-                if r:
-                    submission_id = r[0]
+                cur = conn.execute('INSERT INTO submissions (student_email, student_name, student_identifier) VALUES (?,?,?) RETURNING id',
+                                   (student_email, student_name, student_identifier))
+                r = cur.fetchone()
+                if r is None:
+                    submission_id = None
+                else:
+                    try:
+                        submission_id = r[0]
+                    except Exception:
+                        try:
+                            submission_id = list(r.values())[0]
+                        except Exception:
+                            submission_id = None
+            except Exception as exc:
+                print('[SUBMIT] Postgres INSERT RETURNING failed:', exc)
+                submission_id = None
+        else:
+            cur = conn.execute('INSERT INTO submissions (student_email, student_name, student_identifier) VALUES (?,?,?)',
+                               (student_email, student_name, student_identifier))
+            try:
+                submission_id = getattr(cur, 'lastrowid', None)
             except Exception:
+                submission_id = None
+            if not submission_id:
                 try:
                     r = conn.execute('SELECT id FROM submissions ORDER BY id DESC LIMIT 1').fetchone()
                     if r:
-                        submission_id = r[0]
+                        try:
+                            submission_id = r[0]
+                        except Exception:
+                            submission_id = list(r.values())[0]
                 except Exception:
                     submission_id = None
 
         questions_list = [dict(q) for q in questions]
         answers_map = {}
+        print('[SUBMIT] submission_id resolved as:', submission_id)
         for q in questions_list:
             answer = request.form.get(f'answer_{q["id"]}', '').strip()
             answers_map[q['id']] = answer
