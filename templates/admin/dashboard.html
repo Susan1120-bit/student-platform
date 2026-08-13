@@ -74,7 +74,13 @@
         <td style="text-align:center; font-weight:700; color:#2563eb;">
           {{ q['submission_count'] }}
         </td>
-        <td style="color:#94a3b8; font-size:0.8rem;">{{ q['created_at'][:10] }}</td>
+        <td style="color:#94a3b8; font-size:0.8rem;">
+          {% if q['created_at'] is string %}
+            {{ q['created_at'][:10] }}
+          {% else %}
+            {{ q['created_at'].strftime('%Y-%m-%d') }}
+          {% endif %}
+        </td>
         <td>
           <div class="btn-row">
             <a href="{{ url_for('admin_edit_question', qid=q['id']) }}"
