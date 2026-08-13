@@ -939,3 +939,21 @@ init_db()
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False)
+
+
+--- begin diff ---
+Add the following near the top where env vars are defined:
+
+ADMIN_ONLY = os.environ.get('ADMIN_ONLY', 'false').lower() in ('1', 'true', 'yes')
+
+And add this guard after admin_required:
+
+@app.before_request
+def _admin_only_guard():
+if not ADMIN_ONLY:
+return
+p = (request.path or '').lower()
+if p.startswith('/admin') or p.startswith('/static') or p == '/favicon.ico':
+return
+return ('Not Found', 404)
+--- end diff ---
