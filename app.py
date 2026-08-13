@@ -84,43 +84,96 @@ def get_db():
 
 def init_db():
     conn = get_db()
-    conn.executescript('''
-        CREATE TABLE IF NOT EXISTS questions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            description TEXT NOT NULL,
-            template TEXT DEFAULT '',
-            released INTEGER DEFAULT 0,
-            order_num INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS submissions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            student_email TEXT NOT NULL,
-            submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            sent INTEGER DEFAULT 0
-        );
-        CREATE TABLE IF NOT EXISTS answers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            submission_id INTEGER NOT NULL,
-            question_id INTEGER NOT NULL,
-            answer_text TEXT DEFAULT '',
-            claude_feedback TEXT DEFAULT '',
-            FOREIGN KEY (submission_id) REFERENCES submissions(id),
-            FOREIGN KEY (question_id) REFERENCES questions(id)
-        );
-    ''')
-    for sql in [
-        'ALTER TABLE questions ADD COLUMN template TEXT DEFAULT ""',
-        'ALTER TABLE questions ADD COLUMN released INTEGER DEFAULT 0',
-        'ALTER TABLE answers ADD COLUMN claude_feedback TEXT DEFAULT ""',
-        'ALTER TABLE submissions ADD COLUMN student_name TEXT DEFAULT ""',
-        'ALTER TABLE submissions ADD COLUMN student_identifier TEXT DEFAULT ""',
-    ]:
-        try:
+    is_postgres = bool(os.environ.get('DATABASE_URL'))
+
+    if is_postgres:
+        statements = [
+            '''
+            CREATE TABLE IF NOT EXISTS questions (
+                id SERIAL PRIMARY KEY,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                template TEXT DEFAULT '',
+                released INTEGER DEFAULT 0,
+                order_num INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            ''',
+            '''
+            CREATE TABLE IF NOT EXISTS submissions (
+                id SERIAL PRIMARY KEY,
+                student_email TEXT NOT NULL,
+                student_name TEXT DEFAULT '',
+                student_identifier TEXT DEFAULT '',
+                submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                sent INTEGER DEFAULT 0
+            );
+            ''',
+            '''
+            CREATE TABLE IF NOT EXISTS answers (
+                id SERIAL PRIMARY KEY,
+                submission_id INTEGER NOT NULL,
+                question_id INTEGER NOT NULL,
+                answer_text TEXT DEFAULT '',
+                claude_feedback TEXT DEFAULT '',
+                FOREIGN KEY (submission_id) REFERENCES submissions(id),
+                FOREIGN KEY (question_id) REFERENCES questions(id)
+            );
+            ''',
+        ]
+        for sql in statements:
             conn.execute(sql)
-        except Exception:
-            pass
+
+        ALTERS = [
+            "ALTER TABLE questions ADD COLUMN IF NOT EXISTS template TEXT DEFAULT ''",
+            "ALTER TABLE questions ADD COLUMN IF NOT EXISTS released INTEGER DEFAULT 0",
+            "ALTER TABLE answers ADD COLUMN IF NOT EXISTS claude_feedback TEXT DEFAULT ''",
+            "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS student_name TEXT DEFAULT ''",
+            "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS student_identifier TEXT DEFAULT ''",
+        ]
+        for sql in ALTERS:
+            try:
+                conn.execute(sql)
+            except Exception:
+                pass
+    else:
+        conn.executescript('''
+            CREATE TABLE IF NOT EXISTS questions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                template TEXT DEFAULT '',
+                released INTEGER DEFAULT 0,
+                order_num INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS submissions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_email TEXT NOT NULL,
+                submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                sent INTEGER DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS answers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                submission_id INTEGER NOT NULL,
+                question_id INTEGER NOT NULL,
+                answer_text TEXT DEFAULT '',
+                claude_feedback TEXT DEFAULT '',
+                FOREIGN KEY (submission_id) REFERENCES submissions(id),
+                FOREIGN KEY (question_id) REFERENCES questions(id)
+            );
+        ''')
+        for sql in [
+            'ALTER TABLE questions ADD COLUMN template TEXT DEFAULT ""',
+            'ALTER TABLE questions ADD COLUMN released INTEGER DEFAULT 0',
+            'ALTER TABLE answers ADD COLUMN claude_feedback TEXT DEFAULT ""',
+            'ALTER TABLE submissions ADD COLUMN student_name TEXT DEFAULT ""',
+            'ALTER TABLE submissions ADD COLUMN student_identifier TEXT DEFAULT ""',
+        ]:
+            try:
+                conn.execute(sql)
+            except Exception:
+                pass
     conn.commit()
     conn.close()
 
