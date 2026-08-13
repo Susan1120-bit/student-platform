@@ -805,6 +805,24 @@ def admin_send_now():
     return redirect(url_for('admin_dashboard'))
 
 
+# Temporary admin-only debug endpoint to inspect DB connectivity and recent questions
+@app.route('/admin/debug')
+@admin_required
+def admin_debug():
+    try:
+        conn = get_db()
+        q_count = conn.execute('SELECT COUNT(*) FROM questions').fetchone()[0]
+        s_count = conn.execute('SELECT COUNT(*) FROM submissions').fetchone()[0]
+        recent = conn.execute('SELECT id, title, released, created_at FROM questions ORDER BY id DESC LIMIT 20').fetchall()
+        questions = [dict(q) for q in recent]
+        conn.close()
+        return json.dumps({'ok': True, 'questions_count': q_count, 'submissions_count': s_count, 'questions': questions}, default=str), 200, {'Content-Type': 'application/json'}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return json.dumps({'ok': False, 'error': str(e)}), 500, {'Content-Type': 'application/json'}
+
+
 # ─── Email helpers ─────────────────────────────────────────────────────────────
 
 def _send_email(to_email, subject, body_text,
